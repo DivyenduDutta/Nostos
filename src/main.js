@@ -80,6 +80,48 @@ for (let i = 0; i < COUNT; i++) {
 toPositions.set(shapePositions[0]);
 quoteEl.textContent = shapes[0].quote;
 
+// Cyclops pupil: particles near the eye shape's own center are the pupil
+// (drawn as a filled circle of radius 70 in a 600px canvas — see
+// shapes.js's drawEye), everything else is the outline/brow.
+const CYCLOPS_INDEX = shapes.findIndex((s) => s.name === "The Cyclops");
+const VOYAGE_INDEX = shapes.findIndex((s) => s.name === "The Voyage");
+const SCYLLA_INDEX = shapes.findIndex((s) => s.name === "Scylla & Charybdis");
+const ITHACA_INDEX = shapes.findIndex((s) => s.name === "Ithaca");
+
+const cyclopsPupilMask = new Uint8Array(COUNT);
+if (CYCLOPS_INDEX !== -1) {
+  const eyeShape = shapePositions[CYCLOPS_INDEX];
+  const pupilRadius = WORLD_SCALE * 0.26;
+  for (let i = 0; i < COUNT; i++) {
+    const ix = i * 3;
+    const d = Math.hypot(eyeShape[ix], eyeShape[ix + 1]);
+    cyclopsPupilMask[i] = d < pupilRadius ? 1 : 0;
+  }
+}
+
+// Pointer tracked in world space (z=0 plane) for the eye-tracking and
+// whirlpool-pull interactions below.
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2(0, 0);
+const pointerPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+const pointerWorld = new THREE.Vector3();
+let pointerActive = false;
+
+window.addEventListener("pointermove", (e) => {
+  pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  pointerActive = true;
+});
+window.addEventListener("pointerleave", () => {
+  pointerActive = false;
+});
+
+let pupilOffsetX = 0;
+let pupilOffsetY = 0;
+let bobOffsetY = 0;
+const baseColor = new THREE.Color(0xe8dcc4);
+const ithacaColor = new THREE.Color(0xf6dda3);
+
 const RANDOM_DELAY_SPREAD = 1.2;
 const BASE_DURATION = 1.0;
 const DURATION_JITTER = 0.7;
@@ -140,6 +182,40 @@ function animate() {
 
   const t = clock.getElapsedTime();
 
+  if (pointerActive) {
+    raycaster.setFromCamera(pointerNDC, camera);
+    raycaster.ray.intersectPlane(pointerPlane, pointerWorld);
+  }
+
+  // Cyclops: pupil (masked particles) tracks the cursor as a rigid group,
+  // clamped so it can't wander out of the eye's white.
+  const wantsPupilTracking = activeIndex === CYCLOPS_INDEX && pointerActive;
+  let desiredPupilX = 0;
+  let desiredPupilY = 0;
+  if (wantsPupilTracking) {
+    const maxShift = WORLD_SCALE * 0.13;
+    const dist = Math.hypot(pointerWorld.x, pointerWorld.y);
+    const clamped = Math.min(dist, maxShift);
+    if (dist > 0.0001) {
+      desiredPupilX = (pointerWorld.x / dist) * clamped;
+      desiredPupilY = (pointerWorld.y / dist) * clamped;
+    }
+  }
+  pupilOffsetX = THREE.MathUtils.lerp(pupilOffsetX, desiredPupilX, 0.08);
+  pupilOffsetY = THREE.MathUtils.lerp(pupilOffsetY, desiredPupilY, 0.08);
+
+  // The Voyage: gentle bob, like a ship riding low swells.
+  const desiredBob = activeIndex === VOYAGE_INDEX ? Math.sin(t * 1.2) * WORLD_SCALE * 0.035 : 0;
+  bobOffsetY = THREE.MathUtils.lerp(bobOffsetY, desiredBob, 0.05);
+  points.position.y = bobOffsetY;
+
+  // Ithaca: warmer, brighter — homecoming glow.
+  material.color.lerp(activeIndex === ITHACA_INDEX ? ithacaColor : baseColor, 0.03);
+  material.opacity = THREE.MathUtils.lerp(material.opacity, activeIndex === ITHACA_INDEX ? 1 : 0.85, 0.03);
+
+  const scyllaActive = activeIndex === SCYLLA_INDEX && pointerActive;
+  const scyllaPullRadius = WORLD_SCALE * 0.9;
+
   const posAttr = geometry.attributes.position;
   for (let i = 0; i < COUNT; i++) {
     const ix = i * 3;
@@ -152,13 +228,35 @@ function animate() {
     const driftY = Math.cos(t * driftFreqY[i] + driftPhaseY[i]) * drift;
     const driftZ = Math.sin(t * driftFreqZ[i] + driftPhaseZ[i]) * drift * 0.5;
 
-    posAttr.array[ix] = THREE.MathUtils.lerp(fromPositions[ix], toPositions[ix], eased) + driftX;
-    posAttr.array[ix + 1] = THREE.MathUtils.lerp(fromPositions[ix + 1], toPositions[ix + 1], eased) + driftY;
-    posAttr.array[ix + 2] = THREE.MathUtils.lerp(fromPositions[ix + 2], toPositions[ix + 2], eased) + driftZ;
+    let x = THREE.MathUtils.lerp(fromPositions[ix], toPositions[ix], eased) + driftX;
+    let y = THREE.MathUtils.lerp(fromPositions[ix + 1], toPositions[ix + 1], eased) + driftY;
+    const z = THREE.MathUtils.lerp(fromPositions[ix + 2], toPositions[ix + 2], eased) + driftZ;
+
+    if (cyclopsPupilMask[i] && activeIndex === CYCLOPS_INDEX) {
+      x += pupilOffsetX * eased;
+      y += pupilOffsetY * eased;
+    }
+
+    // Scylla & Charybdis: nearby particles get pulled in and swirled
+    // around the cursor, like water circling toward the whirlpool.
+    if (scyllaActive) {
+      const px = pointerWorld.x - x;
+      const py = pointerWorld.y - y;
+      const dist = Math.hypot(px, py);
+      if (dist < scyllaPullRadius && dist > 0.0001) {
+        const pull = (1 - dist / scyllaPullRadius) * 0.4 * eased;
+        const tx = -py / dist;
+        const ty = px / dist;
+        x += px * pull * 0.5 + tx * pull * WORLD_SCALE * 0.2;
+        y += py * pull * 0.5 + ty * pull * WORLD_SCALE * 0.2;
+      }
+    }
+
+    posAttr.array[ix] = x;
+    posAttr.array[ix + 1] = y;
+    posAttr.array[ix + 2] = z;
   }
   posAttr.needsUpdate = true;
-
-  points.rotation.y = t * 0.04;
 
   renderer.render(scene, camera);
 }
