@@ -1,8 +1,14 @@
 import * as THREE from "three";
-import { nextQuote } from "./quotes.js";
 import { buildShapes } from "./shapes.js";
 
-document.getElementById("quote").textContent = nextQuote();
+const quoteEl = document.getElementById("quote");
+function setQuote(text) {
+  quoteEl.classList.add("hidden");
+  setTimeout(() => {
+    quoteEl.textContent = text;
+    quoteEl.classList.remove("hidden");
+  }, 400);
+}
 
 const canvas = document.getElementById("scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -72,6 +78,7 @@ for (let i = 0; i < COUNT; i++) {
   driftFreqZ[i] = 0.15 + Math.random() * 0.25;
 }
 toPositions.set(shapePositions[0]);
+quoteEl.textContent = shapes[0].quote;
 
 const RANDOM_DELAY_SPREAD = 1.2;
 const BASE_DURATION = 1.0;
@@ -118,6 +125,7 @@ const buttons = shapes.map((shape, index) => {
     restaggerTransition(clock.getElapsedTime());
     activeIndex = index;
     buttons.forEach((b, i) => b.classList.toggle("active", i === index));
+    setQuote(shape.quote);
   });
   nav.appendChild(button);
   return button;

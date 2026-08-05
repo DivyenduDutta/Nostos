@@ -50,6 +50,11 @@ body {
   line-height: 1.7;
   color: #e8dcc4;
   opacity: 0.85;
+  transition: opacity 0.4s ease;
+}
+
+.quote.hidden {
+  opacity: 0;
 }
 
 .nav {
