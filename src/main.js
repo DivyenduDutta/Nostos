@@ -63,7 +63,9 @@ image.onload = () => {
   const targetPositions = new Float32Array(COUNT * 3);
   const startPositions = new Float32Array(COUNT * 3);
   const positions = new Float32Array(COUNT * 3);
+  const distFromCenter = new Float32Array(COUNT);
 
+  let maxDist = 0;
   for (let i = 0; i < COUNT; i++) {
     const ix = i * 3;
 
@@ -78,6 +80,42 @@ image.onload = () => {
     positions[ix] = startPositions[ix];
     positions[ix + 1] = startPositions[ix + 1];
     positions[ix + 2] = startPositions[ix + 2];
+
+    const d = Math.hypot(targetPositions[ix], targetPositions[ix + 1]);
+    distFromCenter[i] = d;
+    if (d > maxDist) maxDist = d;
+  }
+
+  // Stagger each particle's reveal by how far it sits from the shape's
+  // center (plus jitter) so the image assembles outward instead of
+  // popping in as one flat wave, and give it a per-particle drift so it
+  // keeps breathing gently once settled.
+  const RADIAL_DELAY_SPREAD = 1.1;
+  const RANDOM_DELAY_JITTER = 0.35;
+  const BASE_DURATION = 1.0;
+  const DURATION_JITTER = 0.7;
+  const DRIFT_AMOUNT = 0.045;
+
+  const delays = new Float32Array(COUNT);
+  const durations = new Float32Array(COUNT);
+  const driftPhaseX = new Float32Array(COUNT);
+  const driftPhaseY = new Float32Array(COUNT);
+  const driftPhaseZ = new Float32Array(COUNT);
+  const driftFreqX = new Float32Array(COUNT);
+  const driftFreqY = new Float32Array(COUNT);
+  const driftFreqZ = new Float32Array(COUNT);
+
+  for (let i = 0; i < COUNT; i++) {
+    const normalizedDist = maxDist > 0 ? distFromCenter[i] / maxDist : 0;
+    delays[i] = normalizedDist * RADIAL_DELAY_SPREAD + Math.random() * RANDOM_DELAY_JITTER;
+    durations[i] = BASE_DURATION + Math.random() * DURATION_JITTER;
+
+    driftPhaseX[i] = Math.random() * Math.PI * 2;
+    driftPhaseY[i] = Math.random() * Math.PI * 2;
+    driftPhaseZ[i] = Math.random() * Math.PI * 2;
+    driftFreqX[i] = 0.15 + Math.random() * 0.25;
+    driftFreqY[i] = 0.15 + Math.random() * 0.25;
+    driftFreqZ[i] = 0.15 + Math.random() * 0.25;
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -96,25 +134,31 @@ image.onload = () => {
   scene.add(points);
 
   const clock = new THREE.Clock();
-  const revealDuration = 2.5;
 
   function animate() {
     requestAnimationFrame(animate);
 
     const t = clock.getElapsedTime();
-    const revealT = Math.min(t / revealDuration, 1);
-    const eased = 1 - Math.pow(1 - revealT, 3);
 
     const posAttr = geometry.attributes.position;
     for (let i = 0; i < COUNT; i++) {
       const ix = i * 3;
-      posAttr.array[ix] = THREE.MathUtils.lerp(startPositions[ix], targetPositions[ix], eased);
-      posAttr.array[ix + 1] = THREE.MathUtils.lerp(startPositions[ix + 1], targetPositions[ix + 1], eased);
-      posAttr.array[ix + 2] = THREE.MathUtils.lerp(startPositions[ix + 2], targetPositions[ix + 2], eased);
+
+      const localT = THREE.MathUtils.clamp((t - delays[i]) / durations[i], 0, 1);
+      const eased = 1 - Math.pow(1 - localT, 3);
+
+      const drift = DRIFT_AMOUNT * eased;
+      const dx = Math.sin(t * driftFreqX[i] + driftPhaseX[i]) * drift;
+      const dy = Math.cos(t * driftFreqY[i] + driftPhaseY[i]) * drift;
+      const dz = Math.sin(t * driftFreqZ[i] + driftPhaseZ[i]) * drift * 0.5;
+
+      posAttr.array[ix] = THREE.MathUtils.lerp(startPositions[ix], targetPositions[ix], eased) + dx;
+      posAttr.array[ix + 1] = THREE.MathUtils.lerp(startPositions[ix + 1], targetPositions[ix + 1], eased) + dy;
+      posAttr.array[ix + 2] = THREE.MathUtils.lerp(startPositions[ix + 2], targetPositions[ix + 2], eased) + dz;
     }
     posAttr.needsUpdate = true;
 
-    points.rotation.y = t * 0.08;
+    points.rotation.y = t * 0.04;
 
     renderer.render(scene, camera);
   }
