@@ -1,4 +1,5 @@
 import { sampleImageToPoints } from "./particles/sampleImage.js";
+import { quotes } from "./quotes.js";
 
 const CANVAS_SIZE = 600;
 
@@ -94,6 +95,7 @@ function drawHome(ctx, w, h) {
   ctx.restore();
 }
 
+// Ordered to line up 1:1 with quotes.js — quotes[i] is this shape's line.
 const SHAPE_DEFS = [
   { name: "The Voyage", draw: drawShip },
   { name: "The Cyclops", draw: drawEye },
@@ -119,7 +121,7 @@ function padToCount(positions, count, target) {
 }
 
 export function buildShapes(count) {
-  return SHAPE_DEFS.map(({ name, draw }) => {
+  return SHAPE_DEFS.map(({ name, draw }, index) => {
     const { positions, count: sampledCount } = sampleImageToPoints(draw, {
       width: CANVAS_SIZE,
       height: CANVAS_SIZE,
@@ -127,6 +129,10 @@ export function buildShapes(count) {
       mode: "alpha",
       alphaThreshold: 100,
     });
-    return { name, positions: padToCount(positions, sampledCount, count) };
+    return {
+      name,
+      quote: quotes[index],
+      positions: padToCount(positions, sampledCount, count),
+    };
   });
 }
